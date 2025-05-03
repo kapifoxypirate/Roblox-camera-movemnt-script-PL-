@@ -1,0 +1,202 @@
+-- LIZENZ ERFORDERLICH FÜR DIE NUTZUNG IN DEINEM PROJEKT
+
+-- SCRIPT ERSTELLT VON SHADE MARKET
+
+-- 🔧 Konfiguration
+local Config = {
+    sensitivity = 0.5,               -- Empfindlichkeit der Mausbewegung
+    snap = math.rad(85),             -- Snap-Grenze für die vertikale Kamerabewegung
+    offsetClose = Vector3.new(2, 2, 8),  -- Kameraversatz, wenn nah
+    offsetFar = Vector3.new(2, 2, 14),   -- Kameraversatz, wenn entfernt
+    smoothness = 0.5,                -- Glätte der Kamerabewegung
+    initialFov = 70,                 -- Anfangsfeld der Sicht (FOV)
+    fovSpeed = 5,                    -- Geschwindigkeit der FOV-Änderung
+    blurIntensity = 5,               -- Intensität des Unschärfeeffekts
+    transitionSpeed = 0.1,           -- Geschwindigkeit des glatten Kameratransitions
+    headBobAmount = 0.2,             -- Menge des Kopfbewegungseffekts
+    headBobSpeed = 6,                -- Geschwindigkeit der Kopfbewegung
+    breathAmount = 0.05,             -- Atmungseffekt
+    breathSpeed = 2,                 -- Geschwindigkeit des Atmungseffekts
+    soundSensitivity = 5,            -- Empfindlichkeit des Kamerazoom-Sounds
+}
+
+-- 🔌 Dienste
+local Players = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
+local ContextActionService = game:GetService("ContextActionService")
+local RunService = game:GetService("RunService")
+local Lighting = game:GetService("Lighting")
+local SoundService = game:GetService("SoundService")
+
+-- 📷 Spieler und Kamera
+local Player = Players.LocalPlayer
+local Camera = workspace.CurrentCamera
+
+-- 🧠 Zustandsvariablen
+local Character, Root
+local moveX, moveY, targetX, targetY = 0, 0, 0, 0
+local isMouseLocked, isDragging, isZooming = true, false, false
+local currentFov, targetFov = Config.initialFov, Config.initialFov
+local currentOffset, targetOffset = Config.offsetClose, Config.offsetClose
+local currentFovChange = Config.initialFov
+local bobOffset, headBobTime = Vector3.zero, 0
+local breathOffset = 0
+local blurEffect
+
+-- 🔊 Kamerazoom-Sound
+local cameraSfx = Instance.new("Sound")
+cameraSfx.SoundId = "rbxassetid://9118771206"  -- "Scharren" Soundeffekt
+cameraSfx.Looped = false
+cameraSfx.Volume = 0.3
+cameraSfx.Name = "CameraZoomSfx"
+cameraSfx.Parent = SoundService
+
+-- 📌 Funktion zum Umschalten der Maus-Blockierung
+local function toggleMouseLock()
+    UserInputService.MouseBehavior = isMouseLocked and Enum.MouseBehavior.LockCenter or Enum.MouseBehavior.Default
+    UserInputService.MouseIconEnabled = not isMouseLocked
+end
+
+-- 🔁 Aktualisieren der Spielerfigur
+local function updateCharacter()
+    Character = Player.Character or Player.CharacterAdded:Wait()
+    Root = Character:WaitForChild("HumanoidRootPart")
+end
+updateCharacter()
+Player.CharacterAdded:Connect(updateCharacter)
+
+-- 📦 Unschärfe-Effekt einrichten
+local function setupBlurEffect()
+    blurEffect = Instance.new("BlurEffect")
+    blurEffect.Size = 0
+    blurEffect.Parent = Lighting
+end
+setupBlurEffect()
+
+-- 🎥 Mausbewegung
+local function mouseMove(_, _, input)
+    if isMouseLocked or (UserInputService.MouseIconEnabled and isDragging) then
+        targetX -= input.Delta.x * Config.sensitivity / 100
+        targetY -= input.Delta.y * Config.sensitivity / 100
+        targetY = math.clamp(targetY, -Config.snap, Config.snap)
+    end
+end
+ContextActionService:BindActionToInputTypes("MouseMove", mouseMove, false, Enum.UserInputType.MouseMovement)
+
+-- 🖱️ Eingabeereignisse
+UserInputService.InputBegan:Connect(function(input, processed)
+    if processed then return end
+
+    if input.KeyCode == Enum.KeyCode.E then
+        isMouseLocked = not isMouseLocked
+        toggleMouseLock()
+
+    elseif input.KeyCode == Enum.KeyCode.V then
+        isZooming = not isZooming
+        targetOffset = isZooming and Config.offsetFar or Config.offsetClose
+
+        -- Spiele den Sound bei Perspektivwechsel
+        if not cameraSfx.IsPlaying then
+            cameraSfx:Play()
+        end
+
+    elseif input.UserInputType == Enum.UserInputType.MouseButton2 then
+        isDragging = true
+        if not isMouseLocked then
+            UserInputService.MouseBehavior = Enum.MouseBehavior.LockCurrentPosition
+        end
+    end
+end)
+
+UserInputService.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton2 then
+        isDragging = false
+        if not isMouseLocked then
+            UserInputService.MouseBehavior = Enum.MouseBehavior.Default
+        end
+    end
+end)
+
+-- 🌬️ Kopfbewegungseffekt
+local function updateHeadBob(deltaTime)
+    local humanoid = Character:FindFirstChildOfClass("Humanoid")
+    local velocity = Root.Velocity
+    local speed = Vector3.new(velocity.X, 0, velocity.Z).Magnitude
+
+    if speed > 1 and humanoid and humanoid.MoveDirection.Magnitude > 0 then
+        headBobTime += deltaTime * Config.headBobSpeed
+        local x = math.sin(headBobTime) * Config.headBobAmount
+        local y = math.abs(math.cos(headBobTime)) * Config.headBobAmount
+        bobOffset = bobOffset:Lerp(Vector3.new(x, y, 0), 0.1)
+    else
+        bobOffset = bobOffset:Lerp(Vector3.zero, 0.1)
+    end
+end
+
+-- 😮 Atmungseffekt
+local function updateBreath()
+    local humanoid = Character:FindFirstChildOfClass("Humanoid")
+    local speed = Vector3.new(Root.Velocity.X, 0, Root.Velocity.Z).Magnitude
+
+    if speed < 0.1 and humanoid and humanoid.MoveDirection.Magnitude == 0 then
+        breathOffset = math.sin(tick() * Config.breathSpeed) * Config.breathAmount
+    else
+        breathOffset = 0
+    end
+end
+
+-- 🔍 Zoom und FOV-Änderung
+local function updateZoom()
+    local humanoid = Character:FindFirstChildOfClass("Humanoid")
+    local speed = Vector3.new(Root.Velocity.X, 0, Root.Velocity.Z).Magnitude
+
+    targetFov = (speed > 1 and humanoid and humanoid.MoveDirection.Magnitude > 0)
+        and 80 or Config.initialFov
+
+    currentFovChange += (targetFov - currentFovChange) * 0.02
+    Camera.FieldOfView = currentFovChange
+end
+
+-- 🔦 Kamera-Kollisionsbehandlung
+local function handleRaycast(desiredCFrame)
+    local clipCorrection = 0.2
+    local rayStart = Root.Position + Vector3.new(0, currentOffset.Y, 0)
+    local rayEnd = (desiredCFrame * CFrame.new(0, 0, clipCorrection)).Position
+    local direction = rayEnd - rayStart
+
+    local rayParams = RaycastParams.new()
+    rayParams.FilterDescendantsInstances = {Character}
+    rayParams.FilterType = Enum.RaycastFilterType.Blacklist
+
+    local result = workspace:Raycast(rayStart, direction, rayParams)
+    if result then
+        return CFrame.new(result.Position) * (desiredCFrame - desiredCFrame.Position) * CFrame.new(0, 0, -clipCorrection)
+    else
+        return desiredCFrame
+    end
+end
+
+-- 🧠 Hauptkamera-Aktualisierungsfunktion
+local function updateCamera(deltaTime)
+    moveX += (targetX - moveX) * Config.smoothness
+    moveY += (targetY - moveY) * Config.smoothness
+
+    updateHeadBob(deltaTime)
+    updateBreath()
+    updateZoom()
+
+    currentOffset = currentOffset:Lerp(targetOffset, Config.transitionSpeed)
+    local camPos = Root.Position
+    local cam = CFrame.new(camPos) * CFrame.Angles(0, moveX, 0) * CFrame.Angles(moveY, 0, 0)
+    cam *= CFrame.new(currentOffset + bobOffset + Vector3.new(0, breathOffset, 0))
+
+    local blurAmount = math.abs((targetOffset - currentOffset).Magnitude) * Config.blurIntensity
+    blurEffect.Size = math.min(blurAmount, 24)
+
+    Camera.CFrame = handleRaycast(cam)
+end
+
+-- 🚀 Initialisierung
+Camera.CameraType = Enum.CameraType.Scriptable
+toggleMouseLock()
+RunService.RenderStepped:Connect(updateCamera)
