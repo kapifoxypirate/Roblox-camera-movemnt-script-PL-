@@ -20,7 +20,7 @@ Protect your rights, follow the rules, and take advantage of SHADE MARKET's lice
 
 ##########################################################################################################################################################################################################################################################################################################################
 
-Deutsche Version
+Deutsche Version:
 Die Nutzung von SHADE MARKET-Skripten ohne Lizenz ist verboten!
 Wir möchten darauf hinweisen, dass die Verwendung unserer Skripte in irgendeinem Roblox-Spiel ohne den vorherigen Erwerb einer Lizenz bei SHADE MARKET gegen die Regeln verstößt und rechtliche Konsequenzen nach sich ziehen kann. Die in unserem Shop verfügbaren Skripte unterliegen speziellen Lizenzbedingungen, die deren legale Nutzung nur nach dem Erwerb einer Lizenz ermöglichen.
 
